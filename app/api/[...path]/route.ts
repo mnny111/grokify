@@ -1,3 +1,4 @@
+import {tokenIdentitySchema,tokenImage} from '../../../lib/token-identity';
 import {assignSite,coinCard,directory,resolveSite} from '../../../lib/coin-sites';
 import {z} from 'zod';
 import {generateProduct} from '../../../lib/generator';
@@ -47,8 +48,20 @@ async function route(req:Request){
    await db().batch([db().prepare('INSERT INTO messages(id,project,role,content,created) VALUES(?,?,?,?,?)').bind(id(),pid,'user',b.message,now()),db().prepare('INSERT INTO messages(id,project,role,content,created) VALUES(?,?,?,?,?)').bind(id(),pid,'assistant',result.reply,now()+1),db().prepare('UPDATE projects SET name=?,symbol=?,kind=?,description=?,config=?,revision=revision+1,updated=? WHERE id=?').bind(result.spec.name,result.spec.symbol,result.spec.kind,result.spec.description,JSON.stringify(result.spec),now(),pid)]);return json({reply:result.reply,project:publicProject(await owned(pid))});
    }finally{await release()}
   }
-  if(op==='build'&&method==='POST'){const release=await lock(pid);try{await assignSite(p);const spec=specSchema.parse(JSON.parse(p.config));const latest=await one('SELECT MAX(version) AS v FROM builds WHERE project=?',pid);const version=(latest.v||0)+1;if(runtime().XAI_API_KEY)await rateLimit(u,'build',10);const html=runtime().XAI_API_KEY?await generateProduct(spec):null;await db().batch([db().prepare('INSERT INTO builds(id,project,version,spec,html,created) VALUES(?,?,?,?,?,?)').bind(id(),pid,version,JSON.stringify(spec),html,now()),db().prepare('UPDATE projects SET status=?,updated=? WHERE id=?').bind(p.mint?'live':'built',now(),pid)]);const site=coinCard(await owned(pid));return json({version,url:site.siteUrl,message:'Product compiled and published to its runtime.'});}finally{await release()}}
+  if(op==='build'&&method==='POST'){const release=await lock(pid);try{await assignSite(p);const spec=specSchema.parse(JSON.parse(p.config));const latest=await one('SELECT MAX(version) AS v FROM builds WHERE project=?',pid);const version=(latest.v||0)+1;if(runtime().XAI_API_KEY)await rateLimit(u,'build',10);const html=runtime().XAI_API_KEY?await generateProduct(spec):null;await db().batch([db().prepare('INSERT INTO builds(id,project,version,spec,html,created) VALUES(?,?,?,?,?,?)').bind(id(),pid,version,JSON.stringify(spec),html,now()),db().prepare('UPDATE projects SET status=?,updated=? WHERE id=?').bind(p.mint?'live':'built',now(),pid)]);if(!p.mint)await run('INSERT INTO messages(id,project,role,content,created) VALUES(?,?,?,?,?)',id(),pid,'assistant','Your product is built and published. What image, name and ticker would you like for its token? Open Launch to add them and I will prepare the wallet and deployment.',now());const site=coinCard(await owned(pid));return json({version,url:site.siteUrl,message:'Product compiled and published to its runtime.'});}finally{await release()}}
   if(op==='export'&&method==='GET'){const b=await one('SELECT * FROM builds WHERE project=? ORDER BY version DESC LIMIT 1',pid);if(!b)throw new HttpError(409,'Build your product first.');return new Response(JSON.stringify({format:'grokify-product-v1',project:publicProject(p),blueprint:JSON.parse(b.spec),runtime:`${url.origin}/products/${pid}`,api:`${url.origin}/api/products/${pid}`,version:b.version,html:b.html},null,2),{headers:{'Content-Type':'application/json','Content-Disposition':`attachment; filename="grokify-${p.symbol.toLowerCase()}.json"`}});}
+  if(op==='launch-details'&&method==='POST'){
+   const b=tokenIdentitySchema.parse(await body(req));try{tokenImage(b.image)}catch{throw new HttpError(400,'Choose a valid PNG, JPEG or WebP image.');}
+   const release=await lock(pid);try{
+    const current=await owned(pid);
+    if(current.mint)throw new HttpError(409,'This token has already launched.');
+    if(!await one('SELECT id FROM builds WHERE project=? LIMIT 1',p.parent||pid))throw new HttpError(409,'Build the product before preparing its token.');
+    if(await one("SELECT id FROM jobs WHERE project=? AND status='submitted' LIMIT 1",p.parent||pid))throw new HttpError(409,'A transaction is awaiting confirmation. Check Activity.');
+    await run('UPDATE projects SET token_name=?,token_symbol=?,token_image=?,updated=? WHERE id=?',b.name,b.symbol,b.image,now(),pid);
+   }finally{await release()}
+   const treasury=await setupTreasury(await owned(p.parent||pid));
+   return json({address:treasury.address,balance:await balance(treasury.address)});
+  }
   if(op==='treasury'&&method==='POST')return json(await setupTreasury(p));
   if(op==='balance'&&method==='GET')return json({lamports:p.treasury?await balance(p.treasury):'0'});
   if(op==='launch'&&method==='POST')return json(await launchToken(p,url.origin));
