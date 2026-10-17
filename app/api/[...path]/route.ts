@@ -1,13 +1,13 @@
 import {assignSite,coinCard,directory,resolveSite} from '../../../lib/coin-sites';
 import {z} from 'zod';
 import {generateProduct} from '../../../lib/generator';
-import {all,one,run,id,now,user,owned,publicProject,body,originCheck,grok,runtime,HttpError,rateLimit,db,lock} from '../../../lib/server';
+import {all,one,run,id,now,user,owned,publicProject,body,originCheck,requestOrigin,grok,runtime,HttpError,rateLimit,db,lock} from '../../../lib/server';
 import {inferSpec,specSchema,policySchema,lamports} from '../../../lib/domain';
 import {setupTreasury,launchToken,cycle,reconcile,balance} from '../../../lib/treasury';
 export const dynamic='force-dynamic';
 const json=(data:any,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 async function route(req:Request){
- const url=new URL(req.url),parts=url.pathname.slice(5).split('/'),method=req.method;
+ const incoming=new URL(req.url),url=new URL(incoming.pathname+incoming.search,requestOrigin(req)),parts=url.pathname.slice(5).split('/'),method=req.method;
  if(method!=='GET')originCheck(req);
  if(parts[0]==='status')return json({grok:!!runtime().XAI_API_KEY,treasury:!!runtime().TREASURY_MASTER_KEY,launch:runtime().ENABLE_MAINNET==='true'&&!!runtime().PINATA_JWT&&!!runtime().SOLANA_RPC_URL,buybacks:runtime().ENABLE_MAINNET==='true'&&!!runtime().SOLANA_RPC_URL,model:runtime().XAI_MODEL||'grok-4.7'});
  if(parts[0]==='launchpad'&&method==='GET'){const page=z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get('page')||0);const search=z.string().max(100).parse(url.searchParams.get('q')||'');return json(await directory(search,page));}

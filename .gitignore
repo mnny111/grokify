@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.railway-next/
 /.vinext/
 /out/
 

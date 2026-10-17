@@ -105,6 +105,26 @@ The Worker routes `slug.grokify.fun/` to `/sites/slug`. `PRODUCT_BASE_DOMAIN` de
 
 On Railway, attach `grokify.fun` and `*.grokify.fun` to the web service's HTTP port. Use the exact DNS and certificate-validation records provided by Railway. One wildcard routes future coin names without creating a DNS record for every coin. Do not add guessed DNS targets.
 
-**Hosting boundary:** the working Sites deployment uses managed Cloudflare D1 migrations and a trusted identity gateway. The current `npm start` command is Wrangler local preview, not a production Railway database/authentication adapter. Deploying that command to Railway does not configure persistent production storage or real user sign-in. Complete that integration before accepting customer data or funds. Custom product hosts strip untrusted Sites identity headers; public reads work with a configured database, but authenticated writes require a real Railway-compatible identity integration. Never inject a shared owner identity or a Sites bypass credential to make public requests work.
+**Hosting boundary:** Sites uses managed Cloudflare D1 and its trusted identity gateway. `npm start` remains the Sites local-preview command. Railway uses the separate Dockerfile and native runtime below, with persistent SQLite and wallet-verified accounts. Never inject a shared owner identity or a Sites bypass credential to make public requests work.
 
 Tests: `node --test tests/sites.test.mjs` and `node tests/sites-integration.mjs`. `node tests/directory-integration.mjs` verifies 26-token pagination and cross-owner listings using temporary local-only fixtures which it removes afterward. These fixture tests do not prove on-chain launches or wildcard DNS readiness.
+
+### Native Railway runtime
+
+The root Dockerfile builds native Next.js and starts `railway/server.mjs` on port 8787. It does not run Wrangler. Attach one Railway volume at `/data`; Railway sets `RAILWAY_VOLUME_MOUNT_PATH`. Startup refuses to run without persistent storage and applies versioned migrations transactionally. SQLite uses WAL, a busy timeout, and atomic D1-compatible batches. Keep this service at one replica with one attached volume. Configure volume backups in Railway before customer launch.
+
+`grokify.fun` and `*.grokify.fun` route to this service. Railway Domains manages the root ANAME, wildcard CNAME and ACME validation record. The Docker image enables `PRODUCT_SUBDOMAINS_ENABLED=true`. Each published product receives a stable hostname automatically; no per-coin DNS request is needed.
+
+`/signin` supports Phantom and Solflare signed-message login. No auth provider key is required. Challenges expire in five minutes and are consumed once. Sessions are random, stored hashed, expire after seven days, and use host-only Secure HttpOnly cookies. Coin subdomains have isolated sessions; sign in on each host when using authenticated features. Incoming Sites identity headers are discarded and replaced only after session verification. The Sites preview retains its own separate D1 database and ChatGPT identities; data is not silently copied or merged into wallet accounts.
+
+The `/healthz` endpoint checks storage. `/auth/session` and `/auth/logout` expose session status and same-origin logout. Existing `/signin-with-chatgpt` links redirect to native wallet sign-in on Railway. Billable AI and financial features still require their separate provider configuration and funded verification.
+
+Native verification:
+```sh
+node scripts/build-railway.mjs
+node --test tests/railway-auth.test.mjs
+# Local server only: set GROKIFY_LOCAL_TEST=true, GROKIFY_DATA_DIR to a scratch directory, PORT=8790
+node railway/server.mjs
+node tests/railway-http.mjs
+```
+The HTTP test uses a newly generated disposable wallet to sign login messages locally, creates only local project fixtures, and makes no blockchain transaction.
