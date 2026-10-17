@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: "Grokify · build something worth launching",
   description: "Turn a conversation into a working product, a token, and a transparent revenue engine.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/grokify-logo.png",
+    shortcut: "/grokify-logo.png",
   },
 };
 
@@ -21,3 +21,4 @@ export default function RootLayout({
     </html>
   );
 }
+
