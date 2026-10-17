@@ -15,7 +15,19 @@ export function publicProject(p:any){if(!p)return p;const {secret,owner,...rest}
 export async function body(req:Request){if(Number(req.headers.get('content-length')||0)>80000)throw new HttpError(413,'Request is too large.');const text=await req.text();if(text.length>80000)throw new HttpError(413,'Request is too large.');try{return JSON.parse(text)}catch{throw new HttpError(400,'Invalid JSON.')}}
 export function requestOrigin(req:Request){return runtime().GROKIFY_NATIVE==='true'?`${req.headers.get('x-forwarded-proto')}://${req.headers.get('x-forwarded-host')}`:new URL(req.url).origin;}
 export function originCheck(req:Request){const origin=req.headers.get('origin');if(origin&&origin!==requestOrigin(req))throw new HttpError(403,'Cross-origin writes are not allowed.');}
-export async function grok(messages:any[],json=false,maxTokens=2500){const e=runtime();if(!e.XAI_API_KEY)throw new HttpError(503,'Grok is not connected yet. Add XAI_API_KEY to enable AI conversations and custom builds.');const r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${e.XAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:e.XAI_MODEL||'grok-4.7',messages,max_tokens:maxTokens,...(json?{response_format:{type:'json_object'}}:{})}),signal:AbortSignal.timeout(90000)});if(!r.ok)throw new HttpError(502,`Grok provider returned ${r.status}. Check the model and API account.`);const data:any=await r.json();return data.choices?.[0]?.message?.content||'';}
+export async function grok(messages:any[],json=false,maxTokens=2500,timeoutMs=90000){
+ const e=runtime();if(!e.XAI_API_KEY)throw new HttpError(503,'Grok is not connected yet. Add XAI_API_KEY to enable AI conversations and custom builds.');
+ const signal=AbortSignal.timeout(timeoutMs);
+ try {
+  const r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${e.XAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:e.XAI_MODEL||'grok-4.7',messages,max_tokens:maxTokens,...(json?{response_format:{type:'json_object'}}:{})}),signal});
+  if(!r.ok)throw new HttpError(502,`Grok provider returned ${r.status}. Check the model and API account.`);
+  const data:any=await r.json();return data.choices?.[0]?.message?.content||'';
+ } catch(error) {
+  if(error instanceof HttpError)throw error;
+  if(signal.aborted)throw new HttpError(504,'Grok took too long to finish. Your blueprint and previous build are safe. Please retry the build, or simplify the request.');
+  throw new HttpError(502,'Grok could not complete the response. Your saved project is safe. Please try again.');
+ }
+}
 export async function rateLimit(u:string,type:string,limit=20){const result=await run('INSERT INTO records (id,project,owner,type,data,created) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM records WHERE owner=? AND type=? AND created>?)<?',id(),'system',u,'rate:'+type,'{}',now(),u,'rate:'+type,now()-3600000,limit);if(!result.meta.changes)throw new HttpError(429,'Hourly limit reached. Please try again later.');}
-export async function lock(project:string){const token=id();await run('INSERT INTO locks(project,token,expires) VALUES (?,?,?) ON CONFLICT(project) DO UPDATE SET token=excluded.token,expires=excluded.expires WHERE locks.expires<?',project,token,now()+180000,now());const l=await one('SELECT * FROM locks WHERE project=?',project);if(l.token!==token)throw new HttpError(409,'An operation is already running.');return ()=>run('DELETE FROM locks WHERE project=? AND token=?',project,token);}
+export async function lock(project:string,durationMs=180000){const token=id();await run('INSERT INTO locks(project,token,expires) VALUES (?,?,?) ON CONFLICT(project) DO UPDATE SET token=excluded.token,expires=excluded.expires WHERE locks.expires<?',project,token,now()+durationMs,now());const l=await one('SELECT * FROM locks WHERE project=?',project);if(l.token!==token)throw new HttpError(409,'An operation is already running.');return ()=>run('DELETE FROM locks WHERE project=? AND token=?',project,token);}
 
