@@ -13,6 +13,14 @@ async function route(req:Request){
  if(parts[0]==='status')return json({grok:!!runtime().XAI_API_KEY,treasury:!!runtime().TREASURY_MASTER_KEY,launch:runtime().ENABLE_MAINNET==='true'&&!!runtime().PINATA_JWT&&!!runtime().SOLANA_RPC_URL,buybacks:runtime().ENABLE_MAINNET==='true'&&!!runtime().SOLANA_RPC_URL,model:runtime().XAI_MODEL||'grok-4.7'});
  if(parts[0]==='launchpad'&&method==='GET'){const page=z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get('page')||0);const search=z.string().max(100).parse(url.searchParams.get('q')||'');return json(await directory(search,page));}
  if(parts[0]==='sites'&&parts[1]){const slug=z.string().regex(/^[a-z0-9-]{1,63}$/).parse(parts[1]);const site=await resolveSite(slug);if(!parts[2]&&method==='GET')return json(site);if(parts[2]==='chat'&&method==='POST'){const u=await user();await rateLimit(u,'site-chat',20);const b=z.object({message:z.string().min(1).max(4000)}).parse(await body(req));const reply=await grok([{role:'system',content:'You are the Grokify assistant for this published product. Explain its purpose and how to use it based only on the public details below. Do not claim access to private chats, finances, unpublished plans or actions. Do not promise token returns. Keep answers brief and say when information is missing. Public product data: '+JSON.stringify(site.coin)},{role:'user',content:b.message}],false,600);return json({reply});}}
+ if(parts[0]==='speech'&&method==='POST'){
+  const u=await user();const b=z.object({text:z.string().trim().min(1).max(6000)}).parse(await body(req));
+  const key=runtime().XAI_API_KEY;if(!key)throw new HttpError(503,'Castor voice is not configured yet.');
+  await rateLimit(u,'speech',40);
+  const response=await fetch('https://api.x.ai/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({text:b.text,voice_id:'castor',language:'en',output_format:{codec:'mp3',sample_rate:24000,bit_rate:128000}}),signal:AbortSignal.any([req.signal,AbortSignal.timeout(60000)])});
+  if(!response.ok)throw new HttpError(502,'Castor voice is temporarily unavailable. Please try again.');
+  return new Response(response.body,{headers:{'Content-Type':'audio/mpeg','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+ }
  if(parts[0]==='conversation'&&method==='POST'){
   const u=await user();await rateLimit(u,'conversation',20);
   const b=z.object({message:z.string().min(1).max(4000),history:z.array(z.object({role:z.enum(['user','assistant']),content:z.string().max(6000)})).max(8).default([])}).parse(await body(req));
