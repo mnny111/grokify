@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {lamports,allocation,inferSpec,specSchema} from '../lib/domain.ts';
+test('SOL amounts are exact, including a single lamport',()=>{assert.equal(lamports('0.000000001'),'1');assert.equal(lamports('12.123456789'),'12123456789')});
+test('negative, exponent and overprecision amounts are rejected',()=>{for(const v of ['-1','1e5','0.0000000001','NaN','Infinity'])assert.throws(()=>lamports(v))});
+test('buyback is limited by revenue, not treasury deposits',()=>assert.equal(allocation(100n,100000n,80,10000n,20n,10000n),80n));
+test('reserve and daily spending limits are enforced',()=>{assert.equal(allocation(1000n,100n,100,1000n,90n,100n),10n);assert.equal(allocation(1000n,2000n,100,1000n,10n,5n),5n)});
+test('insufficient or negative allowance never creates spending',()=>{assert.equal(allocation(-5n,1000n,100,100n,0n,100n),0n);assert.equal(allocation(100n,20n,100,100n,50n,100n),0n)});
+test('trade cap and zero percent respected',()=>{assert.equal(allocation(1000n,1000n,100,15n,0n,100n),15n);assert.equal(allocation(1000n,1000n,0,15n,0n,100n),0n)});
+test('every guided builder returns a valid typed blueprint',()=>{for(const kind of ['launchpad','tool','dashboard','game'])assert.equal(specSchema.parse(inferSpec('Build a product called Orbit with real features',kind)).kind,kind)});
+test('schema rejects unsupported runtimes and unsafe theme values',()=>{const s=inferSpec('Build a useful tool');assert.equal(specSchema.safeParse({...s,kind:'shell'}).success,false);assert.equal(specSchema.safeParse({...s,accent:'url(https://evil.invalid)'}).success,false)});
