@@ -20,7 +20,11 @@ async function route(req:Request){
  }
  if(parts[0]==='runner'&&method==='POST'){
   const secret=runtime().RUNNER_SECRET;if(!secret||req.headers.get('authorization')!==`Bearer ${secret}`)throw new HttpError(401,'Unauthorized');
-  const enabled=await all('SELECT p.* FROM projects p JOIN policies t ON t.project=p.id WHERE t.enabled=1 AND p.parent IS NULL LIMIT 20');const results=[];for(const p of enabled){try{results.push({id:p.id,...await cycle(p)})}catch(e:any){results.push({id:p.id,error:e.message})}}return json({results});
+  if(runtime().ENABLE_MAINNET!=='true')return json({mode:'disabled',reason:'Mainnet execution is disabled',results:[],nextCursor:null});
+  const options=z.object({cursor:z.string().max(100).optional(),dryRun:z.boolean().optional()}).parse(await body(req));
+  const enabled=await all("SELECT p.* FROM projects p JOIN policies t ON t.project=p.id WHERE t.enabled=1 AND p.parent IS NULL AND p.mint IS NOT NULL AND p.mint<>'' AND p.id>? ORDER BY p.id LIMIT 5",options.cursor||'');
+  const results=[];for(const p of enabled){if(options.dryRun){results.push({id:p.id,status:'eligible'});continue}try{results.push({id:p.id,...await cycle(p)})}catch(e:any){results.push({id:p.id,error:e.message})}}
+  return json({mode:options.dryRun?'dry-run':'live',results,nextCursor:enabled.length===5?enabled.at(-1).id:null});
  }
  if(parts[0]==='projects'&&!parts[1]){
   const u=await user();
