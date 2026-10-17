@@ -1,9 +1,20 @@
+import {tenantSlug} from '../lib/site-address';
 import handler from "vinext/server/fetch-handler";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 export default {
   fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+    const address=new URL(request.url);const domain=(env as any).PRODUCT_BASE_DOMAIN||'grokify.fun';
+    // This host uses Railway, not the trusted Sites identity gateway.
+    // Never accept caller-supplied Sites identity headers on product domains.
+    if(address.hostname===domain||address.hostname.endsWith('.'+domain)){
+      const safeHeaders=new Headers(request.headers);
+      for(const key of [...safeHeaders.keys()])if(key.startsWith('oai-authenticated-'))safeHeaders.delete(key);
+      request=new Request(request,{headers:safeHeaders});
+    }
+    const slug=tenantSlug(address.hostname,domain);
+    if(slug&&address.pathname==='/'){address.pathname='/sites/'+slug;request=new Request(address,request);}
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and
     // the auxiliary service binding are absent from production builds.

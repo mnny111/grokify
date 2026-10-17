@@ -1,0 +1,5 @@
+export const reservedSlugs=new Set(['www','api','app','admin','mail','launchpad','explore','build','docs','sites','products','assets','static','auth','support']);
+export function slugBase(name:string){const slug=name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40).replace(/-$/,'');return !slug||reservedSlugs.has(slug)||/^p-[0-9a-f-]{36}$/.test(slug)?'coin':slug}
+export function siteSlug(p:{id:string,site_slug?:string|null}){return p.site_slug||`p-${p.id}`}
+export function siteAddress(p:{id:string,site_slug?:string|null},domain?:string,enabled=false){const slug=siteSlug(p);return enabled&&domain&&/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(domain)?`https://${slug}.${domain.toLowerCase()}`:`/sites/${slug}`}
+export function tenantSlug(hostname:string,domain:string){if(!domain||!hostname.endsWith('.'+domain))return null;const slug=hostname.slice(0,-domain.length-1);return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug)&&!reservedSlugs.has(slug)?slug:null}

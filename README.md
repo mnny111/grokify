@@ -89,3 +89,22 @@ Integration tests are local-only and create QA records. Unit tests are not evide
 - https://developers.jup.ag/docs/swap/order-and-execute
 
 Pump APIs evolve. Recent fee-account/sweep changes and shared-fee tokens need real-chain compatibility verification. This implementation uses single-recipient creator wallets; it does not configure immutable Pump fee shares. Do not enable unattended mainnet execution until a small funded test verifies the current provider behavior and all receipts.
+
+## Coin websites and public launchpad
+
+- `/launchpad` lists all confirmed tokens across owners, including child coins. Search by name, ticker or mint, with 24-item pagination. Drafts and submitted-but-unconfirmed launches are excluded.
+- Projects reserve a permanent unique `site_slug` on creation (existing projects reserve one on their next build). Duplicate names receive an ID suffix. Existing built projects without a slug retain a stable `p-<project-id>` fallback.
+- `/sites/<slug>` displays the published product, token identity and a voice-capable assistant restricted to public project details. A child coin can display its parent product when it has no own build. Unbuilt and unlaunched drafts return 404 from the public site API.
+- New token metadata links to the coin's website. Previously minted metadata is not rewritten.
+- Public payloads omit private prompts, ownership IDs, encrypted keys and unpublished blueprint changes.
+- Migration `0001_aberrant_sleepwalker.sql` adds the nullable unique site name; it must run against the same database used by the application.
+
+### grokify.fun and Railway
+
+The Worker routes `slug.grokify.fun/` to `/sites/slug`. `PRODUCT_BASE_DOMAIN` defaults to `grokify.fun`. Keep `PRODUCT_SUBDOMAINS_ENABLED=false` until wildcard DNS, TLS, routing, and the production database are verified; existing `/sites/` links remain usable meanwhile. Set it to `true` only on the deployment actually serving those subdomains.
+
+On Railway, attach `grokify.fun` and `*.grokify.fun` to the web service's HTTP port. Use the exact DNS and certificate-validation records provided by Railway. One wildcard routes future coin names without creating a DNS record for every coin. Do not add guessed DNS targets.
+
+**Hosting boundary:** the working Sites deployment uses managed Cloudflare D1 migrations and a trusted identity gateway. The current `npm start` command is Wrangler local preview, not a production Railway database/authentication adapter. Deploying that command to Railway does not configure persistent production storage or real user sign-in. Complete that integration before accepting customer data or funds. Custom product hosts strip untrusted Sites identity headers; public reads work with a configured database, but authenticated writes require a real Railway-compatible identity integration. Never inject a shared owner identity or a Sites bypass credential to make public requests work.
+
+Tests: `node --test tests/sites.test.mjs` and `node tests/sites-integration.mjs`. `node tests/directory-integration.mjs` verifies 26-token pagination and cross-owner listings using temporary local-only fixtures which it removes afterward. These fixture tests do not prove on-chain launches or wildcard DNS readiness.
