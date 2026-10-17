@@ -15,11 +15,11 @@ export function publicProject(p:any){if(!p)return p;const {secret,owner,...rest}
 export async function body(req:Request){if(Number(req.headers.get('content-length')||0)>80000)throw new HttpError(413,'Request is too large.');const text=await req.text();if(text.length>80000)throw new HttpError(413,'Request is too large.');try{return JSON.parse(text)}catch{throw new HttpError(400,'Invalid JSON.')}}
 export function requestOrigin(req:Request){return runtime().GROKIFY_NATIVE==='true'?`${req.headers.get('x-forwarded-proto')}://${req.headers.get('x-forwarded-host')}`:new URL(req.url).origin;}
 export function originCheck(req:Request){const origin=req.headers.get('origin');if(origin&&origin!==requestOrigin(req))throw new HttpError(403,'Cross-origin writes are not allowed.');}
-export async function grok(messages:any[],json=false,maxTokens=2500,timeoutMs=90000){
+export async function grok(messages:any[],json=false,maxTokens=2500,timeoutMs=90000,reasoningEffort?:'low'|'medium'|'high'){
  const e=runtime();if(!e.XAI_API_KEY)throw new HttpError(503,'Grok is not connected yet. Add XAI_API_KEY to enable AI conversations and custom builds.');
  const signal=AbortSignal.timeout(timeoutMs);
  try {
-  const r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${e.XAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:e.XAI_MODEL||'grok-4.7',messages,max_tokens:maxTokens,...(json?{response_format:{type:'json_object'}}:{})}),signal});
+  const r=await fetch('https://api.x.ai/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${e.XAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:e.XAI_MODEL||'grok-4.7',messages,max_tokens:maxTokens,...(reasoningEffort?{reasoning_effort:reasoningEffort}:{}),...(json?{response_format:{type:'json_object'}}:{})}),signal});
   if(!r.ok)throw new HttpError(502,`Grok provider returned ${r.status}. Check the model and API account.`);
   const data:any=await r.json();return data.choices?.[0]?.message?.content||'';
  } catch(error) {
