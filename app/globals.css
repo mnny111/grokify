@@ -18,3 +18,12 @@
 @keyframes builder-bob{0%,100%{transform:translateY(3px) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}
 @keyframes builder-shadow{0%,100%{transform:scaleX(1);opacity:.85}50%{transform:scaleX(.8);opacity:.5}}
 @media(prefers-reduced-motion:reduce){.builder-mascot-float,.builder-mascot-shadow{animation:none}}
+/* Microphone amplitude uses a separate layer from idle motion. */
+.mascot-voice-motion{height:100%;width:100%;display:flex;align-items:center;justify-content:center;transform:translateY(var(--voice-lift,0px)) rotate(var(--voice-tilt,0deg)) scale(var(--voice-scale,1));transition:transform 90ms ease-out;will-change:transform}
+.mascot-listening-glow{position:absolute;inset:18% 14%;z-index:-1;border-radius:50%;background:radial-gradient(ellipse,#ffca4b38,transparent 68%);opacity:0;transform:scale(.85);transition:opacity .3s,transform .2s}
+.is-listening .mascot-listening-glow{opacity:calc(.35 + var(--voice-level)*.65);transform:scale(calc(.9 + var(--voice-level)*.3))}
+.is-listening .builder-mascot-float{animation-duration:2.8s}
+.mascot-voice-meter{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;gap:4px;height:25px;background:#fff9;border-radius:20px;padding:0 10px}
+.mascot-voice-meter i{display:block;width:3px;background:#bd870f;border-radius:4px;transition:height 90ms ease-out}
+.round-call.recording{background:#e4ab28;color:#17130b;box-shadow:0 0 0 7px #e4ab2815}
+@media(prefers-reduced-motion:reduce){.mascot-voice-motion{transform:none;transition:none;will-change:auto}.mascot-listening-glow{transform:none!important}.mascot-voice-meter i{transition:none}}
