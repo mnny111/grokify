@@ -9,6 +9,12 @@ async function route(req:Request){
  const url=new URL(req.url),parts=url.pathname.slice(5).split('/'),method=req.method;
  if(method!=='GET')originCheck(req);
  if(parts[0]==='status')return json({grok:!!runtime().XAI_API_KEY,treasury:!!runtime().TREASURY_MASTER_KEY,launch:runtime().ENABLE_MAINNET==='true'&&!!runtime().PINATA_JWT&&!!runtime().SOLANA_RPC_URL,buybacks:runtime().ENABLE_MAINNET==='true'&&!!runtime().SOLANA_RPC_URL,model:runtime().XAI_MODEL||'grok-4.7'});
+ if(parts[0]==='conversation'&&method==='POST'){
+  const u=await user();await rateLimit(u,'conversation',20);
+  const b=z.object({message:z.string().min(1).max(4000),history:z.array(z.object({role:z.enum(['user','assistant']),content:z.string().max(6000)})).max(8).default([])}).parse(await body(req));
+  if(!runtime().XAI_API_KEY)return json({reply:'I can help you start a product blueprint. Describe your idea, then select Start building. My AI conversation is not connected yet; the site owner needs to add the xAI API key before I can discuss and refine your ideas.'});
+  const reply=await grok([{role:'system',content:'You are Grokify, a friendly product building assistant speaking aloud. Answer concisely in 2 to 4 plain sentences. Discuss the idea and ask a useful follow-up. Supported runtimes are launchpad, AI text tool, token dashboard and arithmetic game. Be honest that custom backend integrations require development. This conversation cannot create, launch tokens, move funds or execute actions. Never claim it has. Users must explicitly select Start building and review subsequent actions. Never request secrets.'},...b.history,{role:'user',content:b.message}],false,500);return json({reply});
+ }
  if(parts[0]==='runner'&&method==='POST'){
   const secret=runtime().RUNNER_SECRET;if(!secret||req.headers.get('authorization')!==`Bearer ${secret}`)throw new HttpError(401,'Unauthorized');
   const enabled=await all('SELECT p.* FROM projects p JOIN policies t ON t.project=p.id WHERE t.enabled=1 AND p.parent IS NULL LIMIT 20');const results=[];for(const p of enabled){try{results.push({id:p.id,...await cycle(p)})}catch(e:any){results.push({id:p.id,error:e.message})}}return json({results});
