@@ -7,7 +7,7 @@ import {z} from 'zod';
 import {generateProduct} from '../../../lib/generator';
 import {all,one,run,id,now,user,owned,publicProject,body,originCheck,requestOrigin,grok,runtime,HttpError,rateLimit,db,lock} from '../../../lib/server';
 import {inferSpec,specSchema,policySchema,lamports} from '../../../lib/domain';
-import {setupTreasury,launchToken,cycle,childRevenueCycle,reconcile,balance} from '../../../lib/treasury';
+import {sponsorLaunch,setupTreasury,launchToken,cycle,childRevenueCycle,reconcile,balance} from '../../../lib/treasury';
 export const dynamic='force-dynamic';
 const json=(data:any,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 async function route(req:Request){
@@ -84,7 +84,7 @@ async function route(req:Request){
   }
   if(op==='treasury'&&method==='POST')return json(await setupTreasury(p));
   if(op==='balance'&&method==='GET')return json({lamports:p.treasury?await balance(p.treasury):'0'});
-  if(op==='launch'&&method==='POST')return json(await launchToken(p,url.origin));
+  if(op==='launch'&&method==='POST'){const funding=await sponsorLaunch(p);return json(funding||await launchToken(p,url.origin));}
   if(op==='reconcile'&&method==='POST')return json(await reconcile(p));
   if(op==='cycle'&&method==='POST')return json(await cycle(p));
   if(op==='policy'&&method==='PUT'){const b=policySchema.parse(await body(req));const max=lamports(b.maxSol),reserve=lamports(b.reserveSol),daily=lamports(b.dailySol);if(BigInt(max)>10000000000n||BigInt(daily)>50000000000n||BigInt(reserve)<10000000n)throw new HttpError(400,'Maximum 10 SOL per buyback, 50 SOL daily, and minimum 0.01 SOL reserve.');if(b.enabled&&(!p.mint||!p.secret||runtime().ENABLE_MAINNET!=='true'))throw new HttpError(409,'Launch the main token and configure mainnet before enabling buybacks.');const r=await run('UPDATE policies SET enabled=?,percent=?,max_lamports=?,reserve_lamports=?,daily_lamports=?,revision=revision+1 WHERE project=? AND revision=?',b.enabled?1:0,b.percent,max,reserve,daily,pid,b.revision);if(!r.meta.changes)throw new HttpError(409,'Policy changed. Reload and retry.');return json({saved:true});}

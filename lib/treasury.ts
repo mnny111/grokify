@@ -24,6 +24,40 @@ async function master(){const key=runtime().TREASURY_MASTER_KEY;if(!key||bytes(k
 async function encrypt(secret:Uint8Array,context:string){const iv=crypto.getRandomValues(new Uint8Array(12)),out=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(context)},await master(),secret as BufferSource);return `${b64(iv)}.${b64(new Uint8Array(out))}`;}
 async function signer(p:any){const [iv,data]=p.secret.split('.');return Keypair.fromSecretKey(new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(iv),additionalData:new TextEncoder().encode(p.id)},await master(),bytes(data))));}
 export async function balance(address:string){return String(await rpc().getBalance(new PublicKey(address),'confirmed'));}
+// Launch subsidies are deposits, never creator revenue. Only the configured
+// operator treasury can sponsor; callers cannot choose a source or destination.
+export async function sponsorLaunch(p:any){
+ live();if(p.mint)throw new HttpError(409,'This token is already launched.');
+ if(!p.token_image||!p.secret||!p.treasury||!await one('SELECT id FROM builds WHERE project=? LIMIT 1',p.parent||p.id))throw new HttpError(409,'Finish the product and token details first.');
+ if(p.parent&&!p.public_launch)throw new HttpError(409,'This legacy launch requires operator review.');
+ if(p.public_launch&&!((await one('SELECT mint FROM projects WHERE id=?',p.parent))?.mint))throw new HttpError(409,'The launchpad main token must be live first.');
+ const minimum=p.public_launch?30000000n:20000000n;
+ if(BigInt(await balance(p.treasury))>=minimum)return null;
+ const source=await one('SELECT * FROM projects WHERE id=?',runtime().LAUNCH_SPONSOR_PROJECT_ID||'');
+ if(!source?.secret||!source.treasury)throw new HttpError(503,'Treasury-sponsored launches are awaiting operator setup. You do not need to deposit funds.');
+ if(source.id===p.id)throw new HttpError(503,'The platform treasury needs an operator top-up before launching.');
+ const release=await lock(source.id);
+ try{
+  await reconcileUnlocked(source);
+  const grants=await all("SELECT * FROM jobs WHERE project=? AND kind='sponsor'",source.id);
+  const previous=grants.find(j=>JSON.parse(j.payload).targetProject===p.id&&['confirmed','submitted'].includes(j.status));
+  if(previous?.status==='submitted')return {status:'funding',signature:previous.signature};
+  const current=BigInt(await balance(p.treasury));if(current>=minimum)return null;
+  if(previous)throw new HttpError(409,'This token already received its launch funding. The operator must review it before retrying.');
+  const recent=grants.filter(j=>j.created>now()-86400000&&['submitted','confirmed'].includes(j.status));
+  if(recent.some(j=>JSON.parse(j.payload).owner===p.owner))throw new HttpError(429,'One sponsored launch per account every 24 hours. Please try again later.');
+  const amount=30000000n-current;
+  const spent=recent.reduce((sum,j)=>sum+BigInt(JSON.parse(j.payload).amount),0n);
+  if(spent+amount>150000000n)throw new HttpError(429,'Today’s sponsored-launch budget is fully allocated. Please try again later.');
+  await pending(source);
+  if(BigInt(await balance(source.treasury))<amount+51000000n)throw new HttpError(503,'Sponsored launches are waiting for a platform treasury top-up. No user payment is required.');
+  const key=await signer(source),block=await rpc().getLatestBlockhash('confirmed');
+  const tx=new VersionedTransaction(new TransactionMessage({payerKey:key.publicKey,recentBlockhash:block.blockhash,instructions:[SystemProgram.transfer({fromPubkey:key.publicKey,toPubkey:new PublicKey(p.treasury),lamports:amount})]}).compileToV0Message());
+  await authorizeTransaction(tx,source,[key],amount+1000000n);
+  const job=await persistAndSend(source,'sponsor',tx,{targetProject:p.id,destination:p.treasury,amount:amount.toString(),owner:p.owner});
+  return {...job,status:'funding'};
+ }finally{await release()}
+}
 export async function setupTreasury(p:any){if(p.parent&&!p.public_launch)throw new HttpError(409,'This legacy coin uses its launchpad treasury.');const release=await lock(p.id);try{p=await one('SELECT * FROM projects WHERE id=?',p.id);if(p.treasury)return {address:p.treasury};const key=Keypair.generate();const secret=await encrypt(key.secretKey,p.id);await run('UPDATE projects SET treasury=?,secret=?,updated=? WHERE id=?',key.publicKey.toBase58(),secret,now(),p.id);return {address:key.publicKey.toBase58()};}finally{await release()}}
 async function upload(file:Blob,name:string){if(!runtime().PINATA_JWT)throw new HttpError(503,'Configure PINATA_JWT for token metadata.');const f=new FormData();f.append('network','public');f.append('file',file,name);const r=await fetch('https://uploads.pinata.cloud/v3/files',{method:'POST',headers:{Authorization:`Bearer ${runtime().PINATA_JWT}`},body:f,signal:AbortSignal.timeout(30000)});if(!r.ok)throw new HttpError(502,`Metadata upload failed (${r.status}).`);const data:any=await r.json();if(!data.data?.cid)throw new HttpError(502,'Metadata provider returned no CID.');return `https://ipfs.io/ipfs/${data.data.cid}`;}
 async function localTx(payload:any){const r=await fetch('https://pumpportal.fun/api/trade-local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(30000)});if(!r.ok)throw new HttpError(502,`PumpPortal returned ${r.status}; no transaction was sent.`);return VersionedTransaction.deserialize(new Uint8Array(await r.arrayBuffer()));}
@@ -39,6 +73,12 @@ export async function launchToken(p:any,origin:string){live();const treasury=tre
 async function reconcileUnlocked(p:any){const jobs=await all("SELECT * FROM jobs WHERE project=? AND status='submitted'",p.id),out=[];const connection=rpc();for(const j of jobs){const payload=JSON.parse(j.payload),tx=await connection.getTransaction(j.signature,{commitment:'confirmed',maxSupportedTransactionVersion:0});if(!tx){const status=(await connection.getSignatureStatuses([j.signature],{searchTransactionHistory:true})).value[0];if(status?.err){await run('UPDATE jobs SET status=?,error=?,updated=? WHERE id=?','failed',JSON.stringify(status.err),now(),j.id);out.push({id:j.id,status:'failed'});continue;}const v=VersionedTransaction.deserialize(bytes(payload.serialized));const valid=await connection.isBlockhashValid(v.message.recentBlockhash);if(!valid.value&&!status){await run('UPDATE jobs SET status=?,error=?,updated=? WHERE id=?','expired','Blockhash expired without a recorded signature.',now(),j.id);out.push({id:j.id,status:'expired'});}else out.push({id:j.id,status:'submitted'});continue;}
  if(tx.meta?.err){await run('UPDATE jobs SET status=?,error=?,updated=? WHERE id=?','failed',JSON.stringify(tx.meta.err),now(),j.id);out.push({id:j.id,status:'failed'});continue;}
  const keys=tx.transaction.message.getAccountKeys({accountKeysFromLookups:tx.meta?.loadedAddresses});let index=-1;for(let i=0;i<keys.length;i++)if(keys.get(i)?.toBase58()===p.treasury)index=i;if(index<0||!tx.meta)throw new HttpError(502,'Treasury account missing from transaction receipt.');const delta=BigInt(tx.meta.postBalances[index])-BigInt(tx.meta.preBalances[index]);if(j.kind==='claim')payload.received=(delta>0n?delta:0n).toString();if(j.kind==='buyback'){payload.spent=payload.amount;const pre=tx.meta.preTokenBalances?.filter(x=>x.owner===p.treasury&&x.mint===p.mint).reduce((s,x)=>s+BigInt(x.uiTokenAmount.amount),0n)||0n,post=tx.meta.postTokenBalances?.filter(x=>x.owner===p.treasury&&x.mint===p.mint).reduce((s,x)=>s+BigInt(x.uiTokenAmount.amount),0n)||0n;payload.outputAmount=(post-pre).toString();}
+ if(j.kind==='sponsor'){
+  const target=await one('SELECT treasury FROM projects WHERE id=?',payload.targetProject);
+  if(!target||target.treasury!==payload.destination)throw new HttpError(409,'Sponsored launch destination changed; operator review required.');
+  let destinationIndex=-1;for(let i=0;i<keys.length;i++)if(keys.get(i)?.toBase58()===target.treasury)destinationIndex=i;
+  if(destinationIndex<0||BigInt(tx.meta.postBalances[destinationIndex])-BigInt(tx.meta.preBalances[destinationIndex])!==BigInt(payload.amount))throw new HttpError(502,'Sponsorship receipt does not match its funding amount.');
+ }
  if(j.kind==='forward'){
   const parent=await one('SELECT * FROM projects WHERE id=?',p.parent);
   if(!parent?.treasury||parent.treasury!==payload.destination)throw new HttpError(409,'Fee destination changed; review this receipt.');
