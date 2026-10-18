@@ -16,6 +16,7 @@ COPY --from=build /app/app ./app
 COPY --from=build /app/railway ./railway
 COPY --from=build /app/scripts/revenue-runner.mjs ./scripts/revenue-runner.mjs
 COPY --from=build /app/scripts/check-integrations.mjs ./scripts/check-integrations.mjs
+COPY --from=build /app/scripts/prepare-funding.mjs ./scripts/prepare-funding.mjs
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/package.json /app/next.config.ts ./
 EXPOSE 8787
