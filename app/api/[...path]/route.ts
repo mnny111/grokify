@@ -1,3 +1,5 @@
+import {adminLogin,requireAdmin,adminCookie} from '../../../lib/admin';
+import {PublicKey} from '@solana/web3.js';
 import {treasuryProject} from '../../../lib/revenue-accounting';
 import {tokenIdentitySchema,tokenImage} from '../../../lib/token-identity';
 import {assignSite,coinCard,directory,resolveSite} from '../../../lib/coin-sites';
@@ -11,6 +13,15 @@ const json=(data:any,status=200)=>Response.json(data,{status,headers:{'Cache-Con
 async function route(req:Request){
  const incoming=new URL(req.url),url=new URL(incoming.pathname+incoming.search,requestOrigin(req)),parts=url.pathname.slice(5).split('/'),method=req.method;
  if(method!=='GET')originCheck(req);
+ if(parts[0]==='main-token'&&method==='GET'){const row=await one("SELECT value FROM site_settings WHERE key='main_token'");return json({address:row?.value||''});}
+ if(parts[0]==='admin'){
+  if(parts[1]==='login'&&method==='POST'){await rateLimit('admin-login','admin-login',60);const b=z.object({passcode:z.string().max(512)}).parse(await body(req));const token=await adminLogin(b.passcode);const response=json({ok:true});response.headers.set('Set-Cookie',adminCookie(token,req));return response;}
+  if(parts[1]==='logout'&&method==='POST'){const response=json({ok:true});response.headers.set('Set-Cookie',adminCookie('',req));return response;}
+  await requireAdmin(req);
+  if(parts[1]==='settings'&&method==='GET'){const row=await one("SELECT value FROM site_settings WHERE key='main_token'");return json({address:row?.value||''});}
+  if(parts[1]==='settings'&&method==='POST'){const b=z.object({address:z.string().trim().max(44)}).parse(await body(req));if(b.address){try{if(new PublicKey(b.address).toBase58()!==b.address)throw new Error()}catch{throw new HttpError(400,'Enter a valid Solana mint address.');}}await run("INSERT INTO site_settings(key,value,updated,updated_by) VALUES ('main_token',?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated=excluded.updated,updated_by=excluded.updated_by",b.address,now(),'passcode-admin');return json({ok:true,address:b.address});}
+  throw new HttpError(404,'Not found');
+ }
  if(parts[0]==='status')return json({grok:!!runtime().XAI_API_KEY,treasury:!!runtime().TREASURY_MASTER_KEY,launch:runtime().ENABLE_MAINNET==='true'&&!!runtime().PINATA_JWT&&!!runtime().SOLANA_RPC_URL,buybacks:runtime().ENABLE_MAINNET==='true'&&!!runtime().SOLANA_RPC_URL,model:runtime().XAI_MODEL||'grok-4.7'});
  if(parts[0]==='launchpad'&&method==='GET'){const page=z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get('page')||0);const search=z.string().max(100).parse(url.searchParams.get('q')||'');return json(await directory(search,page));}
  if(parts[0]==='sites'&&parts[1]){const slug=z.string().regex(/^[a-z0-9-]{1,63}$/).parse(parts[1]);const site=await resolveSite(slug);if(!parts[2]&&method==='GET')return json(site);if(parts[2]==='chat'&&method==='POST'){const u=await user();await rateLimit(u,'site-chat',20);const b=z.object({message:z.string().min(1).max(4000)}).parse(await body(req));const reply=await grok([{role:'system',content:'You are the Grokify assistant for this published product. Explain its purpose and how to use it based only on the public details below. Do not claim access to private chats, finances, unpublished plans or actions. Do not promise token returns. Keep answers brief and say when information is missing. Public product data: '+JSON.stringify(site.coin)},{role:'user',content:b.message}],false,600);return json({reply});}}
